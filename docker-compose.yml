@@ -25,11 +25,11 @@ services:
     networks:
       - posta-net
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/login || exit 1"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000', (r) => { process.exit(r.statusCode < 500 ? 0 : 1); }).on('error', () => process.exit(1));"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 40s
 
   # ==========================================
   # Cloudflare Tunnel (Zero Trust / Remote Access)
@@ -47,8 +47,7 @@ services:
     networks:
       - posta-net
     depends_on:
-      app:
-        condition: service_healthy
+      - app
 
 networks:
   posta-net:
