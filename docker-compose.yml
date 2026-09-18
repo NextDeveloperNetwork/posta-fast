@@ -41,9 +41,9 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: posta-fast-tunnel
     restart: unless-stopped
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-eyJhIjoiZmNhOGY3OTUzOTdmZDk0NDFkYjA0NmI3ZDQ2ODRlMDUiLCJ0IjoiM2U5NWUwNDktODc3Yy00M2I0LTg0MjAtMGI3N2VjYjBiZTEzIiwicyI6IllqazJOakF3WkRNdE9URmtOQzAwTmpBM0xUbGtZV0V0WkRoaU5XTTROekV5WkdGaiJ9}
     environment:
-      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-eyJhIjoiZmNhOGY3OTUzOTdmZDk0NDFkYjA0NmI3ZDQ2ODRlMDUiLCJ0IjoiM2U5NWUwNDktODc3Yy00M2I0LTg0MjAtMGI3N2VjYjBiZTEzIiwicyI6IllqazJOakF3WkRNdE9URmtOQzAwTmpBM0xUbGtZV0V0WkRoaU5XTTROekV5WkdGaiJ9}
     networks:
       - posta-net
     depends_on:
