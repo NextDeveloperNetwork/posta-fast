@@ -7,8 +7,8 @@ WORKDIR /app
 
 # 2. Dependencies
 FROM base AS deps
-COPY package.json package-lock.json* ./
-RUN npm ci
+COPY package.json package-lock.json* .npmrc* ./
+RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 
 # 3. Builder
 FROM base AS builder
@@ -16,9 +16,10 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Environment variables needed during build
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
+ENV AUTH_SECRET="build_time_secret_at_least_32_characters_long_123456"
 
 RUN npm run build
 
