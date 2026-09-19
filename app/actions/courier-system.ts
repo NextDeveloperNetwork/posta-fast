@@ -13,7 +13,7 @@ import {
   financialPayouts,
   users,
 } from "@/db/schema";
-import { eq, and, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, desc, sql, inArray, or, ilike } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 function safeRevalidate(path: string) {
@@ -177,26 +177,110 @@ export async function createPackageAction(sellerId: string, formData: FormData) 
 // 3. OFFICE ACTIONS (INTAKE, BAG LOADING, UNLOADING, CLOSING)
 // ==========================================
 
+export async function getIntakePackagesAction(officeId?: string | null) {
+  try {
+    const allOffices = await db.select().from(offices).orderBy(offices.name);
+    const officeMap = new Map(allOffices.map((o) => [o.id, o.name]));
+
+    const rows = await db
+      .select({
+        id: packages.id,
+        barcode: packages.barcode,
+        sellerId: packages.sellerId,
+        sellerName: users.name,
+        sellerEmail: users.email,
+        intakeOfficeId: packages.intakeOfficeId,
+        destinationOfficeId: packages.destinationOfficeId,
+        paymentType: packages.paymentType,
+        amount: packages.amount,
+        clientName: packages.clientName,
+        clientPhone: packages.clientPhone,
+        clientAddress: packages.clientAddress,
+        clientCity: packages.clientCity,
+        notes: packages.notes,
+        status: packages.status,
+        createdAt: packages.createdAt,
+      })
+      .from(packages)
+      .leftJoin(users, eq(packages.sellerId, users.id))
+      .orderBy(desc(packages.createdAt));
+
+    const enriched = rows.map((p) => ({
+      ...p,
+      intakeOfficeName: officeMap.get(p.intakeOfficeId) || "Zyrë e panjohur",
+      destinationOfficeName: officeMap.get(p.destinationOfficeId) || "Zyrë e panjohur",
+    }));
+
+    return {
+      success: true,
+      packages: enriched,
+      offices: allOffices,
+    };
+  } catch (error: any) {
+    console.error("getIntakePackagesAction error:", error);
+    return { success: false, error: error.message, packages: [], offices: [] };
+  }
+}
+
 export async function intakeScanPackageAction(barcode: string, officeId: string, actorId: string) {
   try {
-    const cleanBarcode = barcode.trim();
+    const raw = String(barcode || "").trim();
+    if (!raw) {
+      return { error: "Ju lutemi shkruani një barkod të vlefshëm." };
+    }
+
+    const upper = raw.toUpperCase();
+    const withPrefix = upper.startsWith("PF-") ? upper : `PF-${upper}`;
+
+    // Search by exact, prefixed, or case-insensitive match
     const [pkg] = await db
       .select()
       .from(packages)
-      .where(eq(packages.barcode, cleanBarcode))
+      .where(
+        or(
+          eq(packages.barcode, raw),
+          eq(packages.barcode, upper),
+          eq(packages.barcode, withPrefix),
+          ilike(packages.barcode, raw),
+          ilike(packages.barcode, `%${raw}%`)
+        )
+      )
       .limit(1);
 
     if (!pkg) {
-      return { error: `Pakoja me barkod ${cleanBarcode} nuk u gjet.` };
+      return { error: `Pakoja me barkod '${raw}' nuk u gjet në sistem.` };
     }
 
     if (pkg.status !== "created") {
-      return { error: `Pakoja ${cleanBarcode} tashmë ka statusin: ${pkg.status}.` };
+      const statusLabels: Record<string, string> = {
+        accepted_at_intake: "Tashmë e pranuar në zyrë",
+        bagged: "Tashmë e ngarkuar në çantë",
+        in_transit_interoffice: "Në tranzit mes zyrave",
+        received_at_dest_office: "E mbërritur në zyrën e destinacionit",
+        out_for_delivery: "Në dorëzim te klienti",
+        delivered: "E dorëzuar me sukses",
+        refused: "E refuzuar",
+      };
+      const label = statusLabels[pkg.status] || pkg.status;
+      return { error: `Pakoja ${pkg.barcode} nuk mund të pranohet sërish (Statusi aktual: ${label}).` };
     }
 
-    // Verify intake office
-    if (pkg.intakeOfficeId !== officeId) {
-      // Allow accepting, but update or warn
+    // Determine a valid office ID to avoid FK constraint error
+    let targetOfficeId: string | null = null;
+    if (officeId && officeId !== "default-office") {
+      const [existingOffice] = await db
+        .select({ id: offices.id })
+        .from(offices)
+        .where(eq(offices.id, officeId))
+        .limit(1);
+      if (existingOffice) {
+        targetOfficeId = existingOffice.id;
+      }
+    }
+
+    // Fallback to pkg.intakeOfficeId if actor doesn't belong to a specific office (e.g. Admin)
+    if (!targetOfficeId) {
+      targetOfficeId = pkg.intakeOfficeId;
     }
 
     await db
@@ -210,15 +294,18 @@ export async function intakeScanPackageAction(barcode: string, officeId: string,
     await db.insert(packageEvents).values({
       packageId: pkg.id,
       status: "accepted_at_intake",
-      actorId,
-      officeId,
-      notes: "Skanuar dhe pranuar në zyrën pritëse.",
+      actorId: actorId || null,
+      officeId: targetOfficeId,
+      notes: "Skanuar dhe pranuar në magazinën e zyrës.",
     });
 
+    safeRevalidate("/office");
     safeRevalidate("/office/intake");
+    safeRevalidate("/office/bags");
     return { success: true, package: pkg };
   } catch (error: any) {
-    return { error: error.message };
+    console.error("intakeScanPackageAction error:", error);
+    return { error: error.message || "Ndodhi një gabim gjatë skanimit të pakos." };
   }
 }
 
