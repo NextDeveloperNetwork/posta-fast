@@ -182,6 +182,12 @@ export async function getIntakePackagesAction(officeId?: string | null) {
     const allOffices = await db.select().from(offices).orderBy(offices.name);
     const officeMap = new Map(allOffices.map((o) => [o.id, o.name]));
 
+    // If a specific officeId is provided, STRICTLY filter only packages awaiting intake at this office!
+    let condition = eq(packages.status, "created");
+    if (officeId && officeId !== "all") {
+      condition = and(eq(packages.status, "created"), eq(packages.intakeOfficeId, officeId)) as any;
+    }
+
     const rows = await db
       .select({
         id: packages.id,
@@ -203,6 +209,7 @@ export async function getIntakePackagesAction(officeId?: string | null) {
       })
       .from(packages)
       .leftJoin(users, eq(packages.sellerId, users.id))
+      .where(condition)
       .orderBy(desc(packages.createdAt));
 
     const enriched = rows.map((p) => ({
@@ -265,22 +272,29 @@ export async function intakeScanPackageAction(barcode: string, officeId: string,
       return { error: `Pakoja ${pkg.barcode} nuk mund të pranohet sërish (Statusi aktual: ${label}).` };
     }
 
-    // Determine a valid office ID to avoid FK constraint error
-    let targetOfficeId: string | null = null;
-    if (officeId && officeId !== "default-office") {
-      const [existingOffice] = await db
-        .select({ id: offices.id })
+    // STRICT OFFICE VALIDATION:
+    // If an officeId is specified and doesn't match pkg.intakeOfficeId, reject with clear explanation!
+    if (officeId && officeId !== "all" && officeId !== "default-office" && pkg.intakeOfficeId !== officeId) {
+      const [intakeOffice] = await db
+        .select({ name: offices.name })
+        .from(offices)
+        .where(eq(offices.id, pkg.intakeOfficeId))
+        .limit(1);
+      const [currentOffice] = await db
+        .select({ name: offices.name })
         .from(offices)
         .where(eq(offices.id, officeId))
         .limit(1);
-      if (existingOffice) {
-        targetOfficeId = existingOffice.id;
-      }
+
+      return {
+        error: `Kjo pako (${pkg.barcode}) është regjistruar për pranim në: "${intakeOffice?.name || 'Zyrë tjetër'}". Ju ndodheni te: "${currentOffice?.name || 'Zyrë tjetër'}". Pakoja mund të pranohet VETËM në zyrën e saj pritëse.`,
+      };
     }
 
-    // Fallback to pkg.intakeOfficeId if actor doesn't belong to a specific office (e.g. Admin)
-    if (!targetOfficeId) {
-      targetOfficeId = pkg.intakeOfficeId;
+    // Valid target office ID
+    let targetOfficeId: string = pkg.intakeOfficeId;
+    if (officeId && officeId !== "all" && officeId !== "default-office") {
+      targetOfficeId = officeId;
     }
 
     await db
@@ -296,7 +310,7 @@ export async function intakeScanPackageAction(barcode: string, officeId: string,
       status: "accepted_at_intake",
       actorId: actorId || null,
       officeId: targetOfficeId,
-      notes: "Skanuar dhe pranuar në magazinën e zyrës.",
+      notes: "Skanuar dhe pranuar në magazinën e zyrës pritëse.",
     });
 
     safeRevalidate("/office");

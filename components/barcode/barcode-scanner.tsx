@@ -9,6 +9,8 @@ import { useTranslation } from "@/lib/i18n/context";
 
 interface BarcodeScannerProps {
   onScan: (barcode: string) => void;
+  onCodeChange?: (code: string) => void;
+  value?: string;
   placeholder?: string;
   autoFocus?: boolean;
   disabled?: boolean;
@@ -17,17 +19,28 @@ interface BarcodeScannerProps {
 
 export function BarcodeScanner({
   onScan,
+  onCodeChange,
+  value,
   placeholder,
   autoFocus = true,
   disabled = false,
   className = "",
 }: BarcodeScannerProps) {
   const { t } = useTranslation();
-  const [manualCode, setManualCode] = useState("");
+  const [internalCode, setInternalCode] = useState("");
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+
+  const currentCode = value !== undefined ? value : internalCode;
+
+  const handleInputChange = (val: string) => {
+    if (value === undefined) {
+      setInternalCode(val);
+    }
+    onCodeChange?.(val);
+  };
 
   // Play subtle feedback beep
   const playBeep = () => {
@@ -55,7 +68,10 @@ export function BarcodeScanner({
     playBeep();
     setLastScanned(trimmed);
     onScan(trimmed);
-    setManualCode("");
+    if (value === undefined) {
+      setInternalCode("");
+    }
+    onCodeChange?.("");
 
     if (autoFocus && inputRef.current) {
       inputRef.current.focus();
@@ -66,7 +82,7 @@ export function BarcodeScanner({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      handleScanSubmit(manualCode);
+      handleScanSubmit(currentCode);
     }
   };
 
@@ -123,8 +139,8 @@ export function BarcodeScanner({
           <Input
             ref={inputRef}
             type="text"
-            value={manualCode}
-            onChange={(e) => setManualCode(e.target.value)}
+            value={currentCode}
+            onChange={(e) => handleInputChange(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={placeholder || t("scan_barcode")}
             autoFocus={autoFocus}
@@ -135,8 +151,8 @@ export function BarcodeScanner({
 
         <Button
           type="button"
-          onClick={() => handleScanSubmit(manualCode)}
-          disabled={disabled || !manualCode.trim()}
+          onClick={() => handleScanSubmit(currentCode)}
+          disabled={disabled || !currentCode.trim()}
           className="h-11 px-5 font-semibold bg-neutral-900 text-neutral-50 dark:bg-[#fce883] dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-[#f5dd6c] shadow-xs"
         >
           {t("submit_scan")}
