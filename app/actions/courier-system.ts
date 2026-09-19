@@ -323,6 +323,49 @@ export async function intakeScanPackageAction(barcode: string, officeId: string,
   }
 }
 
+export async function intakeBatchAcceptAction(packageIds: string[], officeId: string, actorId: string) {
+  try {
+    if (!packageIds || packageIds.length === 0) {
+      return { error: "Nuk keni përzgjedhur asnjë pako për pranim." };
+    }
+
+    const accepted: any[] = [];
+    for (const id of packageIds) {
+      const [pkg] = await db.select().from(packages).where(eq(packages.id, id)).limit(1);
+      if (pkg && pkg.status === "created") {
+        let targetOfficeId: string = pkg.intakeOfficeId;
+        if (officeId && officeId !== "all" && officeId !== "default-office") {
+          targetOfficeId = officeId;
+        }
+
+        await db
+          .update(packages)
+          .set({ status: "accepted_at_intake", updatedAt: new Date() })
+          .where(eq(packages.id, pkg.id));
+
+        await db.insert(packageEvents).values({
+          packageId: pkg.id,
+          status: "accepted_at_intake",
+          actorId: actorId || null,
+          officeId: targetOfficeId,
+          notes: "Pranuar manualisht në magazinën e zyrës pritëse.",
+        });
+
+        accepted.push(pkg);
+      }
+    }
+
+    safeRevalidate("/office");
+    safeRevalidate("/office/intake");
+    safeRevalidate("/office/bags");
+
+    return { success: true, count: accepted.length, accepted };
+  } catch (error: any) {
+    console.error("intakeBatchAcceptAction error:", error);
+    return { error: error.message || "Ndodhi një gabim gjatë pranimit në grup." };
+  }
+}
+
 export async function createBagAction(originOfficeId: string, destinationOfficeId: string) {
   try {
     const barcode = generateCode("BAG", 5);
